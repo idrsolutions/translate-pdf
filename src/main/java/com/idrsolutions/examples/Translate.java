@@ -39,62 +39,64 @@ public class Translate {
     public static void main(String[] args) {
         final String inputFile = "inputFile.pdf";
         final String outputFile = "outputFile.pdf";
-        final int PAGE = 1;
 
         try {
-            // Decode the file to get the text lines
+            // Create an instance odf PdfDecoderServer which is used to extract the text
             final PdfDecoderServer pdfDecoderServer = new PdfDecoderServer();
             pdfDecoderServer.openPdfFile(inputFile);
-            pdfDecoderServer.decodePage(PAGE);
-
-            // Get an estimate of the paragraphs
-            final TextLines textLines = pdfDecoderServer.getTextLines();
-            final int[][] paragraphs = textLines.getParagraphAreasAs2dArray(PAGE, 5);
-
-            // Convert from X,Y,W,H format to X1,Y1,X2,Y2
-            convertRectangles(paragraphs);
-
-            // Obtain the grouping object which is used to extract text
-            final PdfGroupingAlgorithms groupingObject = pdfDecoderServer.getGroupingObject();
 
             // Create an instance of PdfManipulator which is used to write the annotations
             final PdfManipulator pdfManipulator = new PdfManipulator();
             pdfManipulator.loadDocument(new File(inputFile));
 
-            for (final int[] paragraph : paragraphs) {
-                final int x1 = paragraph[0];
-                final int y1 = paragraph[1];
-                final int x2 = paragraph[2];
-                final int y2 = paragraph[3];
+            for (int i = 1; i <= pdfDecoderServer.getPageCount(); i++) {
+                pdfDecoderServer.decodePage(i);
 
-                // Get the text contained in each paragraph
-                final List<String> words = groupingObject.extractTextAsWordlist(x1, y1, x2, y2, PAGE, true, "&:=()!;.,\\/\"\"''");
+                // Get an estimate of the paragraphs
+                final TextLines textLines = pdfDecoderServer.getTextLines();
+                final int[][] paragraphs = textLines.getParagraphAreasAs2dArray(i, 5);
 
-                if (words == null) {
-                    continue;
+                // Convert from X,Y,W,H format to X1,Y1,X2,Y2
+                convertRectangles(paragraphs);
+
+                for (final int[] paragraph : paragraphs) {
+                    final int x1 = paragraph[0];
+                    final int y1 = paragraph[1];
+                    final int x2 = paragraph[2];
+                    final int y2 = paragraph[3];
+
+                    // Obtain the grouping object which is used to extract text
+                    final PdfGroupingAlgorithms groupingObject = pdfDecoderServer.getGroupingObject();
+
+                    // Get the text contained in each paragraph
+                    final List<String> words = groupingObject.extractTextAsWordlist(x1, y1, x2, y2, i, true, "&:=()!;.,\\/\"\"''");
+
+                    if (words == null) {
+                        continue;
+                    }
+
+                    // Concatenate each word
+                    final StringBuilder paragraphString = new StringBuilder();
+                    for (int j = 0; j < words.size(); j += 5) {
+                        paragraphString.append(words.get(j)).append(" ");
+                    }
+
+                    // Remove XML
+                    final String pureText = Strip.convertToText(paragraphString.toString(), true);
+
+                    // Translate
+                    final Translator translator = new Translator();
+                    final Translation translation = translator.translateBlocking(pureText, Language.CHINESE_SIMPLIFIED, Language.ENGLISH);
+                    final String translatedText = translation.getTranslatedText();
+
+                    Thread.sleep(250);
+
+                    // Add a text box annotation containing the translated text which covers the original paragraph
+                    final float[] rect = toFloatArray(paragraph);
+                    final float[] red = new float[] {0.9f, 0.5f, 0.8f};
+                    final int flags = Annotation.getFlagsValue(false, false, true, false, true, false, true, true, false, true);
+                    pdfManipulator.addAnnotation(i, new FreeText(rect, flags, translatedText, red, 1.0f, 1.0f, BaseFont.Helvetica, 10, Quadding.LEFT_JUSTIFIED));
                 }
-
-                // Concatenate each word
-                final StringBuilder paragraphString = new StringBuilder();
-                for (int i = 0; i < words.size(); i += 5) {
-                    paragraphString.append(words.get(i)).append(" ");
-                }
-
-                // Remove XML
-                final String pureText = Strip.convertToText(paragraphString.toString(), true);
-
-                // Translate
-                final Translator translator = new Translator();
-                final Translation translation = translator.translateBlocking(pureText, Language.CHINESE_SIMPLIFIED, Language.ENGLISH);
-                final String translatedText = translation.getTranslatedText();
-
-                Thread.sleep(250);
-
-                // Add a text box annotation containing the translated text which covers the original paragraph
-                final float[] rect = toFloatArray(paragraph);
-                final float[] red = new float[] {0.9f, 0.5f, 0.8f};
-                final int flags = Annotation.getFlagsValue(false, false, true, false, true, false, true, true, false, true);
-                pdfManipulator.addAnnotation(PAGE, new FreeText(rect, flags, translatedText, red, 1.0f, 1.0f, BaseFont.Helvetica, 10, Quadding.LEFT_JUSTIFIED));
             }
 
             // Write the annotations to the new file
